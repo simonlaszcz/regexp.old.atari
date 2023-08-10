@@ -2,7 +2,6 @@ You'll need the following files from the parent folder
 to build the library with Pure C:
 
 REGEXP.H
-REGMAGIC.H
 regerror.c
 regexp.c
 regsub.c
@@ -14,6 +13,6 @@ The following will be produced:
 LIBREGEX.LIB
 
 Put the library file in PURE_C\LIB
-Put the headers in PURE_C\INCLUDE
+Put the header in PURE_C\INCLUDE
 
 (or wherever you have Pure C installed)

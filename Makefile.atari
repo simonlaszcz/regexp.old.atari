@@ -16,8 +16,7 @@ OBJS=\
 	regsub.o
 
 HDRS=\
-	regexp.h \
-	regmagic.h
+	regexp.h
 
 $(LIBNAME): $(OBJS)
 	$(AR) cr $(LIBNAME) $(OBJS)
