@@ -1,0 +1,32 @@
+CC=m68k-atari-mint-gcc
+AS=m68k-atari-mint-as -m68000
+AR=m68k-atari-mint-ar
+
+INSTLIBPATH=/opt/libregexp_spencer/lib
+INSTINCPATH=/opt/libregexp_spencer/include
+LIBNAME=libregexp.a
+
+CFLAGS=-std=c89
+
+.PHONY: install clean
+
+OBJS=\
+	regerror.o \
+	regexp.o \
+	regsub.o
+
+HDRS=\
+	regexp.h \
+	regmagic.h
+
+$(LIBNAME): $(OBJS)
+	$(AR) cr $(LIBNAME) $(OBJS)
+
+install: $(LIBNAME)
+	mkdir -p $(INSTLIBPATH)
+	mkdir -p $(INSTINCPATH)
+	cp $(HDRS) $(INSTINCPATH)
+	cp $(LIBNAME) $(INSTLIBPATH)
+
+clean:
+	rm *.o

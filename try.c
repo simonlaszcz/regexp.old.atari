@@ -12,7 +12,7 @@
  * Field separator is tab.
  */
 #include <stdio.h>
-#include <regexp.h>
+#include "regexp.h"
 
 #ifdef ERRAVAIL
 char *progname;
