@@ -7,10 +7,10 @@ regexp.c
 regsub.c
 
 Put them in the same folder as the project file:
-LIBREGEX.PRJ
+V8REGEXP.PRJ
 
 The following will be produced:
-LIBREGEX.LIB
+V8REGEXP.LIB
 
 Put the library file in PURE_C\LIB
 Put the header in PURE_C\INCLUDE
