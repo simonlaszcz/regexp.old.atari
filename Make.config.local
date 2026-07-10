@@ -1,0 +1,4 @@
+ONLY_68K=N
+PREFIX=/opt/libregexp
+COMPILE_ELF=Y
+CFLAGS=-Wno-old-style-definition

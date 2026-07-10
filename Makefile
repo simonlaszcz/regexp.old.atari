@@ -1,111 +1,208 @@
-# Things you might want to put in ENV:
-# -DERRAVAIL		have utzoo-compatible error() function and friends
-ENV=
+# vim:ts=8:sw=8:noexpandtab:
+# Makefile copied from libcmini - THANKS!
+#
+# disable verbose builds by default
+# If you want to see all the gory details of the build process,
+# run "VERBOSE=yes make <target>"
 
-# Things you might want to put in TEST:
-# -DDEBUG		debugging hooks
-# -I.			regexp.h from current directory, not /usr/include
-TEST=-I.
+ifndef VERBOSE
+  	VERBOSE=no
+endif
+ifeq (,$(filter $(VERBOSE),Y yes))
+  	Q=@
+	v=
+else
+  	Q=
+	v=v
+endif
 
-# Things you might want to put in PROF:
-# -pg			profiler
-PROF=
+all:$(patsubst %,%/$(APP),$(TRGTDIRS))
 
-CFLAGS=-O $(ENV) $(TEST) $(PROF)
-LDFLAGS=$(PROF)
+#
+# ONLY_68K: for faster developing; set to Y to build only the 68000 library
+# BUILD_CF: Build ColdFire binaries.
+#
+ONLY_68K=N
+BUILD_CF=Y
+BUILD_FAST=$(shell if $(CC) -mfastcall -E - < /dev/null >/dev/null 2>&1; then echo Y; else echo N; fi)
+BUILD_SOFT_FLOAT=Y
+BUILD_SHORT=Y
+COMPILE_ELF=Y
 
-LIB=libregexp.a
-OBJ=regexp.o regsub.o regerror.o
-TMP=dtr.tmp
+-include Make.config
+-include Make.config.local
 
-default:	r
+ifneq (,$(filter $(COMPILE_ELF),Y yes))
+	CROSSPREFIX=m68k-atari-mintelf-
+else 
+  	CROSSPREFIX=m68k-atari-mint-
+endif
 
-try:	try.o $(LIB)
-	cc $(LDFLAGS) try.o $(LIB) -o try
+CFLAGS+=\
+	-Os \
+	-fomit-frame-pointer
+	
+CC=$(CROSSPREFIX)gcc
+LD=$(CROSSPREFIX)ld
+CPP=$(CROSSPREFIX)cpp
+OBJCOPY=$(CROSSPREFIX)objcopy
+AR=$(CROSSPREFIX)ar
+RANLIB=$(CROSSPREFIX)ranlib
 
-# Making timer will probably require putting stuff in $(PROF) and then
-# recompiling everything; the following is just the final stage.
-timer:	timer.o $(LIB)
-	cc $(LDFLAGS) timer.o $(LIB) -o timer
+INCLUDE=-Iinclude -I.
+CSRCS= $(wildcard $(SRCDIR)/*.c)
+SRCDIR=src
+BUILDDIR=build
 
-timer.o:	timer.c timer.t.h
+ifneq (,$(filter $(ONLY_68K),Y yes))
+	# asume a multi-lib without flags ar m68000
+	# NOTE \s?$ is important - gcc on Windows outputs \r\n-lineendings but MSYS's grep only accept \n -> \s eats \r
+	MULTILIBDIRS := $(shell $(CC) -print-multi-lib | grep -E ';\s?$$' | sed -e "s/;.*//")
+else
+	MULTILIBDIRS := $(shell $(CC) -print-multi-lib | sed -e "s/;.*//")
+	ifeq (,$(filter $(BUILD_FAST),Y yes))
+		MULTILIBDIRS := $(shell echo $(MULTILIBDIRS) | sed -e 's/\S*fastcall\S*/ /g')
+	endif
+	ifeq (,$(filter $(BUILD_CF),Y yes))
+		MULTILIBDIRS := $(shell echo $(MULTILIBDIRS) | sed -e 's/\S*m5475\S*/ /g')
+	endif
+	ifeq (,$(filter $(BUILD_SOFT_FLOAT),Y yes))
+		MULTILIBDIRS := $(shell echo $(MULTILIBDIRS) | sed -e 's/\S*soft-float\S*/ /g')
+	endif
+	ifeq (,$(filter $(BUILD_SHORT),Y yes))
+		MULTILIBDIRS := $(shell echo $(MULTILIBDIRS) | sed -e 's/\S*short\S*/ /g')
+	endif
+endif
+MULTILIBFLAGS = $(shell $(CC) -print-multi-lib | grep '^$(1);' | sed -e 's/^.*;//' -e 's/@/ -/g')
 
-timer.t.h:	tests
-	sed 's/	/","/g;s/\\/&&/g;s/.*/{"&"},/' tests >timer.t.h
+LIBDIRS=$(patsubst %,$(BUILDDIR)/%,$(MULTILIBDIRS))
+OBJDIRS=$(patsubst %,%/objs,$(LIBDIRS))
 
-# Regression test.
-r:	try tests
-	./try <tests		# no news is good news...
+COBJS=$(patsubst $(SRCDIR)/%.o,%.o,$(patsubst %.c,%.o,$(CSRCS)))
+OBJS=$(COBJS)
 
-$(LIB):	$(OBJ)
-	ar cr $(LIB) $(OBJ)
+LIBC=libregexp.a
 
-regexp.o:	regexp.c regexp.h regmagic.h
-regsub.o:	regsub.c regexp.h regmagic.h
+LIBS=$(patsubst %,%/$(LIBC),$(LIBDIRS))
+
+all: dirs libs
+libs: $(LIBS)
+	
+dirs::
+	$(Q)mkdir -p $(LIBDIRS) $(OBJDIRS)
 
 clean:
-	rm -f *.o core mon.out gmon.out timer.t.h copy try timer r.*
-	rm -f residue rs.* re.1 rm.h re.h ch.soe ch.ps j badcom fig[012]
-	rm -f ch.sml fig[12].ps $(LIB)
-	rm -rf $(TMP) dtr.*
+	@rm -r$(v) $(patsubst %,$(BUILDDIR)/%,$(shell ls $(BUILDDIR)))
 
-# the rest of this is unlikely to be of use to you
+all:$(patsubst %,%/$(APP),$(TRGTDIRS))
 
-BITS = r.1 rs.1 re.1 rm.h re.h
-OPT=-p -ms
+#
+# multilib flags
+#
+define MULTILIBFLAGS_TEMPLATE
+$(BUILDDIR)/$(1)/%: CFLAGS += $(call MULTILIBFLAGS,$(1))
+endef
+$(foreach DIR,$(MULTILIBDIRS),$(eval $(call MULTILIBFLAGS_TEMPLATE,$(DIR))))
 
-ch.soe:	ch $(BITS)
-	soelim ch >$@
+#
+# generate pattern rules for multilib object files
+#
+define CC_TEMPLATE
+$(1)/objs/%.o:$(SRCDIR)/%.c
+	$(Q)echo "CC $$(@)"
+	$(Q)$(CC) -MMD -MP -MF $$(@:.o=.d) $$(CFLAGS) $(INCLUDE) -c $$< -o $$@
 
-ch.sml:	ch $(BITS) smlize splitfigs
-	splitfigs ch | soelim | smlize >$@
+$(1)/objs/%.o:$(SRCDIR)/%.S
+	$(Q)echo "CC $$(@)"
+	$(Q)$(CC) -MMD -MP -MF $$(@:.o=.d) $$(CFLAGS) $(INCLUDE) -c $$< -o $$@
 
-fig0 fig1 fig2:	ch splitfigs
-	splitfigs ch >/dev/null
+$(1)/%.o:$(SRCDIR)/%.S
+	$(Q)echo "CC $$(@)"
+	$(Q)$(CC) -MMD -MP -MF $$(@:.o=.d) $$(CFLAGS) $(INCLUDE) -c $$< -o $$@
+endef
+$(foreach DIR,$(LIBDIRS),$(eval $(call CC_TEMPLATE,$(DIR))))
 
-f:	fig0 fig1 fig2 figs
-	groff -Tps -s $(OPT) figs | lpr
+#
+# generate pattern rules for multilib archive
+#
+define ARC_TEMPLATE
+$(1)_OBJS=$(patsubst %,$(1)/objs/%,$(OBJS))
+$(1)/$(LIBC): $$($(1)_OBJS)
+	$(Q)echo "AR $$@"
+	$(Q)$(AR) cr $$@ $$?
+	$(Q)$(RANLIB) $$@
+LIBDEPEND+=$$($1_OBJS)
+LIBSE+=$(1)/$(LIBC)
+endef
+$(foreach DIR,$(LIBDIRS),$(eval $(call ARC_TEMPLATE,$(DIR))))
 
-fig1.ps:	fig0 fig1
-	( cat fig0 ; echo ".LP" ; cat fig1 ) | groff -Tps $(OPT) >$@
+.PHONY: release
+release: all
+	RELEASETAG=$$(git tag --contains | sed -e 's/v//' | sed -e 's/ //g') ;\
+	RELEASEDIR=libregexp-$$RELEASETAG ;\
+	if [ "x$$RELEASETAG" != "x" ] ; then\
+	    mkdir -p $$RELEASEDIR/lib ;\
+	    cp -r include $$RELEASEDIR ;\
+	    for i in $(MULTILIBDIRS); do \
+		    mkdir -p $$RELEASEDIR/lib/$$i ;\
+	        cp $(BUILDDIR)/$$i/libregexp.a $$RELEASEDIR/lib/$$i ;\
+	        cp $(BUILDDIR)/$$i/crt0.o $$RELEASEDIR/lib/$$i ;\
+	    done ;\
+		chown -R 0:0 $$RELEASEDIR/* ;\
+		tar -C $$RELEASEDIR -cvzf $$RELEASEDIR.tar.gz . ;\
+	    chmod 644 $$RELEASEDIR.tar.gz ;\
+	fi ;\
+	ls -l
 
-fig2.ps:	fig0 fig2
-	( cat fig0 ; echo ".LP" ; cat fig2 ) | groff -Tps $(OPT) >$@
 
-fp:	fig1.ps fig2.ps
+.PHONY: printvars
+printvars:
+	@$(foreach V,$(.VARIABLES),	$(if $(filter-out environment% default automatic, $(origin $V)),$(warning $V=$($V))))
 
-r.1:	regexp.c splitter
-	splitter regexp.c
+install: all
 
-rs.1:	regsub.c splitter
-	splitter regsub.c
+ifeq (,$(PREFIX))
+PREFIX = /opt/libregexp
+endif
+ifeq (,$(PREFIX_FOR_INCLUDE))
+PREFIX_FOR_INCLUDE =
+endif
+ifeq (,$(PREFIX_FOR_LIB))
+PREFIX_FOR_LIB =
+endif
 
-re.1:	regerror.c splitter
-	splitter regerror.c
+ifneq (,$(PREFIX)$(PREFIX_FOR_INCLUDE)$(PREFIX_FOR_LIB))
+	ifneq (,$(DESTDIR))
+		ERR := $(error Options DESTDIR and PREFIX[_FOR_(INCLUDE|LIB)] are mutually incompatible. Use either DESTDIR or PREFIX...)
+	endif
+	ifneq (,$(PREFIX))
+		ifeq (,$(PREFIX_FOR_INCLUDE))
+			PREFIX_FOR_INCLUDE = $(PREFIX)/include
+		endif
+		ifeq (,$(PREFIX_FOR_LIB))
+			PREFIX_FOR_LIB = $(PREFIX)/lib
+		endif
+	endif
+else
+	PREFIX_FOR_INCLUDE = $(DESTDIR)/usr/include
+	PREFIX_FOR_LIB = $(DESTDIR)/usr/lib
+endif
 
-rm.h:	regmagic.h splitter
-	splitter regmagic.h
+ifneq (,$(PREFIX_FOR_INCLUDE))
+install : install-include
+install-include:
+	@mkdir -pv $(PREFIX_FOR_INCLUDE)
+	@cp -arv include/* $(PREFIX_FOR_INCLUDE)
+endif
 
-re.h:	regexp.h splitter
-	splitter regexp.h
+ifneq (,$(PREFIX_FOR_LIB))
+install : install-libs
+install-libs:
+	@for i in $(MULTILIBDIRS); do \
+		mkdir -pv $(PREFIX_FOR_LIB)/$$i; \
+		cp -av $(BUILDDIR)/$$i/$(LIBC) $(PREFIX_FOR_LIB)/$$i; \
+	done
+endif
 
-PLAIN=COPYRIGHT README Makefile regexp.3 try.c timer.c tests
-FIX=regexp.h regexp.c regsub.c regerror.c regmagic.h
-DTR=$(PLAIN) $(FIX)
-
-dtr:	r $(DTR)
-	rm -rf $(TMP)
-	mkdir $(TMP)
-	cp $(PLAIN) $(TMP)
-	for f in $(FIX) ; do normalize $$f >$(TMP)/$$f ; done
-	( cd $(TMP) ; makedtr $(DTR) ) >bookregexp.shar
-	( cd $(TMP) ; tar -cvf ../bookregexp.tar $(DTR) )
-	rm -rf $(TMP)
-
-ch.ps:	ch Makefile $(BITS)
-	groff -Tps $(OPT) ch >$@
-
-copy:	ch.soe ch.sml fp
-	makedtr REMARKS ch.sml fig*.ps ch.soe >$@
-
-go:	copy dtr
+lint:
+	cppcheck -q --std=c99 --enable=performance --language=c --template=gcc -DDGK -DGEMDOS src/*.c
